@@ -42,7 +42,7 @@ class SourceResolver {
 
     // 方式2: 从 JavaScript 中提取 m3u8 链接
     final m3u8Patterns = [
-      RegExp(r'https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*'),
+      RegExp(r'https?://[^\s"<>]+\.m3u8[^\s"<>]*'),
       RegExp(r'"url"\s*:\s*"(https?://[^"]+\.m3u8[^"]*)"'),
       RegExp(r'var\s+\w+\s*=\s*"(https?://[^"]+\.m3u8[^"]*)"'),
     ];
@@ -62,7 +62,7 @@ class SourceResolver {
 
     // 方式3: 从 JavaScript 中提取 mp4 链接
     final mp4Patterns = [
-      RegExp(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*'),
+      RegExp(r'https?://[^\s"<>]+\.mp4[^\s"<>]*'),
       RegExp(r'"url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"'),
       RegExp(r'var\s+\w+\s*=\s*"(https?://[^"]+\.mp4[^"]*)"'),
     ];

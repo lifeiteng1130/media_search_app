@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../data/novel_repository.dart';
+import '../../../core/network/api_client.dart';
 
 /// 小说下载服务
 class NovelDownloadService {
@@ -103,7 +104,7 @@ class NovelDownloadService {
     await box.put(detailUrl, downloadedNovel.toJson());
 
     // 下载每个章节
-    final repository = NovelRepository();
+    final repository = NovelRepository(ApiClient());
     int completed = 0;
 
     for (int i = 0; i < downloadedNovel.chapters.length; i++) {

@@ -5,7 +5,7 @@ enum MediaType {
   novel('小说');
 
   final String label;
-  const MediaType.label(this.label);
+  const MediaType(this.label);
 
   static MediaType fromString(String value) {
     return MediaType.values.firstWhere(
