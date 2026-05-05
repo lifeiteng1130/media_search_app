@@ -9,6 +9,7 @@ import '../features/favorites/presentation/favorites_screen.dart';
 import '../features/history/presentation/history_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import '../features/search/data/models/media_item.dart';
+import '../features/search/data/models/media_type.dart';
 import '../features/novel/data/novel_download_service.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
