@@ -1,29 +1,17 @@
 /// 数据源配置
-/// 在这里添加或修改资源站点
-/// 每个站点需要配置: 名称、搜索URL模板、结果解析选择器
 class DataSources {
-  // ========== 影视资源站点 ==========
-
+  // ========== 影视资源站点（ffzy.tv 包含电影、电视剧、动漫） ==========
   static const videoSources = [
     VideoSource(
-      name: '低端影视',
-      baseUrl: 'https://ddrk.me',
-      searchPath: '/search?keyword={query}',
-      resultSelector: '.module-item',
-      titleSelector: '.title',
-      linkSelector: 'a[href]',
-      coverSelector: 'img',
-      descSelector: '.description',
-    ),
-    VideoSource(
-      name: '奈飞影视',
-      baseUrl: 'https://www.nfmovie.com',
-      searchPath: '/search?keyword={query}',
-      resultSelector: '.movie-item',
-      titleSelector: '.name',
-      linkSelector: 'a[href]',
-      coverSelector: 'img',
-      descSelector: '.intro',
+      name: '非凡资源',
+      baseUrl: 'https://www.ffzy.tv',
+      searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
+      resultSelector: '',
+      titleSelector: '',
+      linkSelector: '',
+      coverSelector: '',
+      descSelector: '',
+      useApi: true,
     ),
   ];
 
@@ -31,53 +19,32 @@ class DataSources {
   static const novelSources = [
     NovelSource(
       name: '笔趣阁',
-      baseUrl: 'https://www.xbiquge.so',
+      baseUrl: 'https://www.52bqg.org',
       searchPath: '/search.html',
       searchMethod: 'POST',
       searchParam: 's',
-      resultSelector: 'dl',
-      titleSelector: 'h3 a',
-      linkSelector: 'a[href]',
+      resultSelector: '.txt-list li',
+      titleSelector: '.s2 a',
+      linkSelector: '.s2 a',
       coverSelector: 'img',
-      authorSelector: '.info',
-      chapterSelector: '.list-chapter a',
-      contentSelector: '#content',
-    ),
-    NovelSource(
-      name: '新笔趣阁',
-      baseUrl: 'https://www.bq730.cc',
-      searchPath: '/search.php?q={query}',
-      resultSelector: '.book-item',
-      titleSelector: '.bookname a',
-      linkSelector: 'a[href]',
-      coverSelector: 'img',
-      authorSelector: '.author',
-      chapterSelector: '.chapterlist a',
-      contentSelector: '.txtnav',
+      authorSelector: '.s3 a',
+      chapterSelector: '',
+      contentSelector: '',
     ),
   ];
 
-  // ========== 动漫资源站点 ==========
+  // ========== 动漫资源站点（复用 ffzy.tv） ==========
   static const animeSources = [
     AnimeSource(
-      name: '樱花动漫',
-      baseUrl: 'https://www.yhdm.so',
-      searchPath: '/search?keyword={query}',
-      resultSelector: '.video-item',
-      titleSelector: '.title',
-      linkSelector: 'a[href]',
-      coverSelector: 'img',
-      descSelector: '.info',
-    ),
-    AnimeSource(
-      name: '风车动漫',
-      baseUrl: 'https://www.dmdmz.com',
-      searchPath: '/search?keyword={query}',
-      resultSelector: '.module-item',
-      titleSelector: '.title',
-      linkSelector: 'a[href]',
-      coverSelector: 'img',
-      descSelector: '.description',
+      name: '非凡动漫',
+      baseUrl: 'https://www.ffzy.tv',
+      searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
+      resultSelector: '',
+      titleSelector: '',
+      linkSelector: '',
+      coverSelector: '',
+      descSelector: '',
+      useApi: true,
     ),
   ];
 }
@@ -91,6 +58,7 @@ class VideoSource {
   final String linkSelector;
   final String coverSelector;
   final String descSelector;
+  final bool useApi;
 
   const VideoSource({
     required this.name,
@@ -101,6 +69,7 @@ class VideoSource {
     required this.linkSelector,
     required this.coverSelector,
     required this.descSelector,
+    this.useApi = false,
   });
 
   String getSearchUrl(String query) {
@@ -161,6 +130,7 @@ class AnimeSource {
   final String linkSelector;
   final String coverSelector;
   final String descSelector;
+  final bool useApi;
 
   const AnimeSource({
     required this.name,
@@ -171,6 +141,7 @@ class AnimeSource {
     required this.linkSelector,
     required this.coverSelector,
     required this.descSelector,
+    this.useApi = false,
   });
 
   String getSearchUrl(String query) {
