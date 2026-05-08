@@ -77,63 +77,79 @@ class NovelRepository {
     final uri = Uri.parse(baseUrl);
     final base = '${uri.scheme}://${uri.host}';
 
-    // 52bqg.org 格式: /book_xxx/xxxxx.html
-    final pattern = RegExp(r'href="(/book_\d+/\d+\.html)"[^>]*>([^<]+)');
-    final matches = pattern.allMatches(html);
+    // 优先从章节列表容器内提取（避免匹配到导航、推荐等区域的链接）
+    final containerSelectors = ['#list', '.listmain', '.chapter-list', '.volume-wrap', '.book-list'];
+    for (final selector in containerSelectors) {
+      final containers = HtmlUtil.extractAll(html, selector);
+      if (containers.isEmpty) continue;
 
-    int index = 0;
-    final seen = <String>{};
-    for (final match in matches) {
-      final path = match.group(1)!;
-      final title = match.group(2)!.trim();
+      final container = containers.first;
+      final links = container.querySelectorAll('a');
+      if (links.isEmpty) continue;
 
-      if (title.isEmpty || title.length < 2) continue;
-      if (seen.contains(path)) continue;
-      seen.add(path);
+      final seen = <String>{};
+      for (final link in links) {
+        final title = link.text.trim();
+        var url = link.attributes['href'] ?? '';
+        if (title.isEmpty || title.length < 2 || url.isEmpty) continue;
 
-      // 跳过目录页链接
-      if (path.contains('index')) continue;
-
-      final url = '$base$path';
-      chapters.add(NovelChapter(
-        title: title,
-        url: url,
-        index: index++,
-      ));
-    }
-
-    // 如果上面的方法没找到，尝试通用选择器
-    if (chapters.isEmpty) {
-      final selectors = [
-        '.chapter-list a',
-        '.list-chapter a',
-        '.chapterlist a',
-        '#list a',
-      ];
-
-      for (final selector in selectors) {
-        final elements = HtmlUtil.extractAll(html, selector);
-        if (elements.isEmpty) continue;
-
-        for (int i = 0; i < elements.length; i++) {
-          final el = elements[i];
-          final title = el.text.trim();
-          var url = el.attributes['href'] ?? '';
-
-          if (title.isEmpty || url.isEmpty) continue;
-
-          if (!url.startsWith('http')) {
-            url = '$base$url';
-          }
-
-          chapters.add(NovelChapter(
-            title: title,
-            url: url,
-            index: i,
-          ));
+        if (!url.startsWith('http')) {
+          url = '$base$url';
         }
 
+        if (seen.contains(url)) continue;
+        seen.add(url);
+
+        chapters.add(NovelChapter(title: title, url: url, index: 0));
+      }
+
+      if (chapters.isNotEmpty) break;
+    }
+
+    // Fallback：正则匹配章节链接
+    if (chapters.isEmpty) {
+      final patterns = [
+        RegExp(r'href="(/book_\d+/\d+\.html)"[^>]*>([^<]+)'),
+        RegExp(r'href="(/\d+/\d+\.html)"[^>]*>([^<]+)'),
+      ];
+
+      final seen = <String>{};
+      for (final pattern in patterns) {
+        for (final match in pattern.allMatches(html)) {
+          final path = match.group(1)!;
+          final title = match.group(2)!.trim();
+
+          if (title.isEmpty || title.length < 2) continue;
+          if (seen.contains(path)) continue;
+          seen.add(path);
+
+          if (path.contains('index')) continue;
+
+          final url = '$base$path';
+          chapters.add(NovelChapter(title: title, url: url, index: 0));
+        }
         if (chapters.isNotEmpty) break;
+      }
+    }
+
+    // 按 URL 中的数字排序（/book_xxx/123.html 中的 123）
+    if (chapters.isNotEmpty) {
+      final numPattern = RegExp(r'/(\d+)\.html$');
+      chapters.sort((a, b) {
+        final aMatch = numPattern.firstMatch(a.url);
+        final bMatch = numPattern.firstMatch(b.url);
+        final aNum = aMatch != null ? int.tryParse(aMatch.group(1)!) ?? 0 : 0;
+        final bNum = bMatch != null ? int.tryParse(bMatch.group(1)!) ?? 0 : 0;
+        return aNum.compareTo(bNum);
+      });
+
+      // 重新分配 index
+      for (int i = 0; i < chapters.length; i++) {
+        chapters[i] = NovelChapter(
+          title: chapters[i].title,
+          url: chapters[i].url,
+          index: i,
+        );
       }
     }
 

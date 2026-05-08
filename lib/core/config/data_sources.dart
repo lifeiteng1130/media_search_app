@@ -1,10 +1,54 @@
 /// 数据源配置
 class DataSources {
-  // ========== 影视资源站点（ffzy.tv 包含电影、电视剧、动漫） ==========
+  // ========== 影视资源站点（MacCMS API 格式） ==========
   static const videoSources = [
     VideoSource(
       name: '非凡资源',
       baseUrl: 'https://www.ffzy.tv',
+      searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
+      resultSelector: '',
+      titleSelector: '',
+      linkSelector: '',
+      coverSelector: '',
+      descSelector: '',
+      useApi: true,
+    ),
+    VideoSource(
+      name: '暴风资源',
+      baseUrl: 'https://www.bfzy.tv',
+      searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
+      resultSelector: '',
+      titleSelector: '',
+      linkSelector: '',
+      coverSelector: '',
+      descSelector: '',
+      useApi: true,
+    ),
+    VideoSource(
+      name: '华为资源',
+      baseUrl: 'https://www.hwzy.net',
+      searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
+      resultSelector: '',
+      titleSelector: '',
+      linkSelector: '',
+      coverSelector: '',
+      descSelector: '',
+      useApi: true,
+    ),
+    VideoSource(
+      name: '八戒资源',
+      baseUrl: 'https://www.bajiezy.com',
+      searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
+      resultSelector: '',
+      titleSelector: '',
+      linkSelector: '',
+      coverSelector: '',
+      descSelector: '',
+      useApi: true,
+    ),
+    VideoSource(
+      name: '快看资源',
+      baseUrl: 'https://www.kuaikanzy.cc',
       searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
       resultSelector: '',
       titleSelector: '',
@@ -31,13 +75,49 @@ class DataSources {
       chapterSelector: '',
       contentSelector: '',
     ),
+    NovelSource(
+      name: '新笔趣阁',
+      baseUrl: 'https://www.xbiquge.so',
+      searchPath: '/search.html',
+      searchMethod: 'POST',
+      searchParam: 's',
+      resultSelector: '.txt-list li',
+      titleSelector: '.s2 a',
+      linkSelector: '.s2 a',
+      coverSelector: 'img',
+      authorSelector: '.s4',
+      chapterSelector: '',
+      contentSelector: '',
+    ),
   ];
 
-  // ========== 动漫资源站点（复用 ffzy.tv） ==========
+  // ========== 动漫资源站点（复用 MacCMS API） ==========
   static const animeSources = [
     AnimeSource(
       name: '非凡动漫',
       baseUrl: 'https://www.ffzy.tv',
+      searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
+      resultSelector: '',
+      titleSelector: '',
+      linkSelector: '',
+      coverSelector: '',
+      descSelector: '',
+      useApi: true,
+    ),
+    AnimeSource(
+      name: '暴风动漫',
+      baseUrl: 'https://www.bfzy.tv',
+      searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
+      resultSelector: '',
+      titleSelector: '',
+      linkSelector: '',
+      coverSelector: '',
+      descSelector: '',
+      useApi: true,
+    ),
+    AnimeSource(
+      name: '华为动漫',
+      baseUrl: 'https://www.hwzy.net',
       searchPath: '/index.php/ajax/suggest?mid=1&wd={query}&limit=20',
       resultSelector: '',
       titleSelector: '',

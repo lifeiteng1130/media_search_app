@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../data/models/media_item.dart';
 import '../data/models/media_type.dart';
+import '../../favorites/presentation/favorites_provider.dart';
 
-class SearchResultTile extends StatelessWidget {
+class SearchResultTile extends ConsumerWidget {
   final MediaItem item;
   final VoidCallback onTap;
 
   const SearchResultTile({super.key, required this.item, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isFav = ref.watch(favoritesProvider).any((i) => i.id == item.id);
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: InkWell(
@@ -23,7 +27,17 @@ class SearchResultTile extends StatelessWidget {
               _buildCover(),
               const SizedBox(width: 12),
               Expanded(child: _buildInfo(context)),
-              const Icon(Icons.chevron_right),
+              // 收藏按钮
+              IconButton(
+                icon: Icon(
+                  isFav ? Icons.favorite : Icons.favorite_border,
+                  color: isFav ? Colors.red : Colors.grey,
+                  size: 22,
+                ),
+                onPressed: () {
+                  ref.read(favoritesProvider.notifier).toggle(item);
+                },
+              ),
             ],
           ),
         ),

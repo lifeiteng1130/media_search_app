@@ -5,6 +5,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import '../../search/data/models/media_item.dart';
+import '../../favorites/presentation/favorites_provider.dart';
 import '../data/player_repository.dart';
 import '../data/source_resolver.dart';
 import '../../../core/network/api_client.dart';
@@ -85,11 +86,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     });
 
     try {
+      final referer = widget.item.detailUrl ?? 'https://www.ffzy.tv/';
       _videoController = VideoPlayerController.networkUrl(
         Uri.parse(source.url),
         httpHeaders: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Referer': source.url,
+          'Referer': referer,
         },
       );
 
@@ -170,6 +172,18 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
       appBar: AppBar(
         title: Text(widget.item.title, style: const TextStyle(fontSize: 16)),
         actions: [
+          // 收藏按钮
+          IconButton(
+            icon: Icon(
+              ref.watch(favoritesProvider).any((i) => i.id == widget.item.id)
+                  ? Icons.favorite
+                  : Icons.favorite_border,
+              color: ref.watch(favoritesProvider).any((i) => i.id == widget.item.id)
+                  ? Colors.red
+                  : null,
+            ),
+            onPressed: () => ref.read(favoritesProvider.notifier).toggle(widget.item),
+          ),
           IconButton(
             icon: const Icon(Icons.screen_rotation),
             onPressed: _toggleFullscreen,
@@ -276,9 +290,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Text('播放源', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Text(
+            '播放源 (${sources.length})',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
         ),
         Expanded(
           child: ListView.builder(
@@ -286,17 +303,18 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
             itemBuilder: (context, index) {
               final source = sources[index];
               final isActive = _currentSource?.url == source.url;
+              final title = source.episodeTitle ?? source.quality;
               return ListTile(
                 leading: Icon(
                   _sourceIcon(source.type),
                   color: isActive ? Theme.of(context).colorScheme.primary : null,
                 ),
-                title: Text(source.quality),
+                title: Text(title),
                 subtitle: Text(
                   source.url,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12),
+                  style: const TextStyle(fontSize: 11),
                 ),
                 trailing: isActive
                     ? Icon(Icons.play_arrow, color: Theme.of(context).colorScheme.primary)

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../search/data/models/media_item.dart';
+import '../../favorites/presentation/favorites_provider.dart';
 import '../data/novel_repository.dart';
 import '../data/novel_download_service.dart';
 import '../../../core/network/api_client.dart';
@@ -39,6 +40,7 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen> {
   double _downloadProgress = 0;
   int _downloadedChapters = 0;
   int _totalChapters = 0;
+  int? _savedChapterIndex;
 
   @override
   void initState() {
@@ -52,7 +54,7 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen> {
       final progress = box.get(widget.item.detailUrl);
       if (progress != null && mounted) {
         final data = Map<String, dynamic>.from(progress);
-        // 恢复阅读进度会在章节加载后处理
+        _savedChapterIndex = data['chapterIndex'] as int?;
       }
     } catch (e) {
       // 忽略错误
@@ -132,6 +134,18 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen> {
           ? AppBar(
               title: Text(_currentChapter?.title ?? widget.item.title),
               actions: [
+                // 收藏按钮
+                IconButton(
+                  icon: Icon(
+                    ref.watch(favoritesProvider).any((i) => i.id == widget.item.id)
+                        ? Icons.favorite
+                        : Icons.favorite_border,
+                    color: ref.watch(favoritesProvider).any((i) => i.id == widget.item.id)
+                        ? Colors.red
+                        : null,
+                  ),
+                  onPressed: () => ref.read(favoritesProvider.notifier).toggle(widget.item),
+                ),
                 // 下载按钮
                 if (!_isDownloading)
                   IconButton(
@@ -183,8 +197,12 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen> {
               return const Center(child: Text('暂无章节'));
             }
             if (_currentChapter == null) {
-              _currentChapter = chapters.first;
-              _saveReadingProgress(_currentChapter!);
+              // 恢复上次阅读进度
+              if (_savedChapterIndex != null && _savedChapterIndex! < chapters.length) {
+                _currentChapter = chapters[_savedChapterIndex!];
+              } else {
+                _currentChapter = chapters.first;
+              }
             }
             return _buildReader(_currentChapter!);
           },
