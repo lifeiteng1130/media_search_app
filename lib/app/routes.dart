@@ -5,6 +5,7 @@ import '../features/search/presentation/search_screen.dart';
 import '../features/player/presentation/video_player_screen.dart';
 import '../features/novel/presentation/novel_reader_screen.dart';
 import '../features/novel/presentation/novel_download_screen.dart';
+import '../features/novel/presentation/book_source_screen.dart';
 import '../features/favorites/presentation/favorites_screen.dart';
 import '../features/history/presentation/history_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
@@ -61,6 +62,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               description: novel.author,
               mediaType: MediaType.novel,
               detailUrl: novel.detailUrl,
+              bookSourceUrl: novel.bookSourceUrl,
             ),
           );
         },
@@ -68,6 +70,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/downloads',
         builder: (context, state) => const NovelDownloadScreen(),
+      ),
+      GoRoute(
+        path: '/book-sources',
+        builder: (context, state) => const BookSourceScreen(),
       ),
     ],
   );

@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../data/novel_repository.dart';
+import '../data/book_source.dart';
+import '../data/book_source_repository.dart';
 import '../../../core/network/api_client.dart';
 
 /// 小说下载服务
@@ -78,6 +80,7 @@ class NovelDownloadService {
     required String coverUrl,
     required String detailUrl,
     required List<NovelChapter> chapters,
+    required BookSource source,
     required Function(int current, int total) onProgress,
     required Function(String chapterTitle) onChapterComplete,
   }) async {
@@ -90,6 +93,7 @@ class NovelDownloadService {
       author: author,
       coverUrl: coverUrl,
       detailUrl: detailUrl,
+      bookSourceUrl: source.bookSourceUrl,
       chapters: chapters.map((c) => DownloadedChapter(
         title: c.title,
         url: c.url,
@@ -104,7 +108,7 @@ class NovelDownloadService {
     await box.put(detailUrl, downloadedNovel.toJson());
 
     // 下载每个章节
-    final repository = NovelRepository(ApiClient());
+    final repository = NovelRepository(ApiClient(), BookSourceRepository(ApiClient()));
     int completed = 0;
 
     for (int i = 0; i < downloadedNovel.chapters.length; i++) {
@@ -112,7 +116,7 @@ class NovelDownloadService {
 
       try {
         // 获取章节内容
-        final content = await repository.getChapterContent(chapter.url);
+        final content = await repository.getChapterContent(chapter.url, source);
 
         // 保存到文件
         final file = File(chapter.filePath);
@@ -181,6 +185,7 @@ class DownloadedNovel {
   final String author;
   final String? coverUrl;
   final String detailUrl;
+  final String? bookSourceUrl;
   final List<DownloadedChapter> chapters;
   final DateTime downloadTime;
 
@@ -189,6 +194,7 @@ class DownloadedNovel {
     required this.author,
     this.coverUrl,
     required this.detailUrl,
+    this.bookSourceUrl,
     required this.chapters,
     required this.downloadTime,
   });
@@ -201,6 +207,7 @@ class DownloadedNovel {
     String? author,
     String? coverUrl,
     String? detailUrl,
+    String? bookSourceUrl,
     List<DownloadedChapter>? chapters,
     DateTime? downloadTime,
   }) {
@@ -209,6 +216,7 @@ class DownloadedNovel {
       author: author ?? this.author,
       coverUrl: coverUrl ?? this.coverUrl,
       detailUrl: detailUrl ?? this.detailUrl,
+      bookSourceUrl: bookSourceUrl ?? this.bookSourceUrl,
       chapters: chapters ?? this.chapters,
       downloadTime: downloadTime ?? this.downloadTime,
     );
@@ -220,6 +228,7 @@ class DownloadedNovel {
       'author': author,
       'coverUrl': coverUrl,
       'detailUrl': detailUrl,
+      'bookSourceUrl': bookSourceUrl,
       'chapters': chapters.map((c) => c.toJson()).toList(),
       'downloadTime': downloadTime.toIso8601String(),
     };
@@ -231,6 +240,7 @@ class DownloadedNovel {
       author: json['author'] as String? ?? '',
       coverUrl: json['coverUrl'] as String?,
       detailUrl: json['detailUrl'] as String,
+      bookSourceUrl: json['bookSourceUrl'] as String?,
       chapters: (json['chapters'] as List?)
           ?.map((c) => DownloadedChapter.fromJson(Map<String, dynamic>.from(c)))
           .toList() ?? [],

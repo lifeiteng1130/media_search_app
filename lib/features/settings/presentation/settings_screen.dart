@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/config/data_sources.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -28,14 +29,19 @@ class SettingsScreen extends ConsumerWidget {
             icon: Icons.animation,
             sources: DataSources.animeSources.map((s) => s.name).toList(),
           ),
-          _buildSection(
-            context,
-            title: '小说资源站',
-            icon: Icons.book,
-            sources: DataSources.novelSources.map((s) => s.name).toList(),
-          ),
 
           const Divider(),
+
+          // 书源管理
+          ListTile(
+            leading: const Icon(Icons.book),
+            title: const Text('书源管理'),
+            subtitle: const Text('管理小说书源（180+ 内置源）'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              context.push('/book-sources');
+            },
+          ),
 
           // 下载管理
           ListTile(

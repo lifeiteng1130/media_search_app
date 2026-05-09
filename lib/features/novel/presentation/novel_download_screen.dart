@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:go_router/go_router.dart';
 import '../data/novel_download_service.dart';
 
 /// 下载管理界面
@@ -143,11 +144,7 @@ class _NovelDownloadScreenState extends ConsumerState<NovelDownloadScreen> {
       child: InkWell(
         onTap: () {
           // 导航到阅读界面
-          Navigator.pushNamed(
-            context,
-            '/novel-reader-offline',
-            arguments: novel,
-          );
+          context.push('/novel-reader-offline', extra: novel);
         },
         borderRadius: BorderRadius.circular(12),
         child: Padding(

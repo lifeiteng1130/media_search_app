@@ -3,14 +3,16 @@ import 'package:html/dom.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/config/data_sources.dart';
 import '../../../core/utils/html_parser.dart';
+import '../../novel/data/novel_repository.dart';
 import 'models/media_item.dart';
 import 'models/media_type.dart';
 import 'models/search_result.dart';
 
 class SearchRepository {
   final ApiClient _apiClient;
+  final NovelRepository _novelRepo;
 
-  SearchRepository(this._apiClient);
+  SearchRepository(this._apiClient, this._novelRepo);
 
   /// 搜索资源：聚合多个数据源
   Future<SearchResult> search(String query, {MediaType? type, int page = 1}) async {
@@ -29,12 +31,11 @@ class SearchRepository {
     }
 
     if (type == null || type == MediaType.novel) {
-      for (final source in DataSources.novelSources) {
-        futures.add(_searchNovelSource(source, query));
-      }
+      // 使用规则化书源系统搜索小说
+      futures.add(_novelRepo.search(query));
     }
 
-    final results = await Future.wait(futures);
+    final results = await Future.wait(futures, eagerError: false);
     final allItems = results.expand((r) => r).toList();
 
     // 去重
@@ -86,7 +87,7 @@ class SearchRepository {
     }
   }
 
-  // ========== API 搜索（ffzy.tv 等 maccms 站点） ==========
+  // ========== API 搜索（MacCMS 站点） ==========
 
   Future<List<MediaItem>> _searchApiSource(
     String baseUrl,
@@ -129,7 +130,6 @@ class SearchRepository {
 
       if (id == null || name.isEmpty) continue;
 
-      // 根据名称判断类型
       var mediaType = defaultType;
       if (name.contains('动漫') || name.contains('番剧') || name.contains('动画')) {
         mediaType = MediaType.anime;
@@ -146,33 +146,6 @@ class SearchRepository {
     }
 
     return items;
-  }
-
-  // ========== 小说搜索 ==========
-
-  Future<List<MediaItem>> _searchNovelSource(NovelSource source, String query) async {
-    try {
-      final url = source.getSearchUrl(query);
-      String html;
-
-      if (source.searchMethod == 'POST') {
-        final body = source.getSearchBody(query);
-        final response = await _apiClient.post(url, data: body);
-        html = response.data as String;
-      } else {
-        html = await _apiClient.fetchHtml(url);
-      }
-
-      return _parseNovelResults(html, source.name, source.baseUrl,
-        resultSelector: source.resultSelector,
-        titleSelector: source.titleSelector,
-        linkSelector: source.linkSelector,
-        coverSelector: source.coverSelector,
-        authorSelector: source.authorSelector,
-      );
-    } catch (e) {
-      return [];
-    }
   }
 
   // ========== 通用结果解析 ==========
@@ -248,82 +221,6 @@ class SearchRepository {
       coverUrl: cover.isNotEmpty ? cover : null,
       description: desc,
       mediaType: defaultType,
-      detailUrl: link.isNotEmpty ? link : null,
-      source: source,
-    );
-  }
-
-  // ========== 小说结果解析 ==========
-
-  List<MediaItem> _parseNovelResults(
-    String html,
-    String source,
-    String baseUrl, {
-    required String resultSelector,
-    required String titleSelector,
-    required String linkSelector,
-    required String coverSelector,
-    required String authorSelector,
-  }) {
-    final items = <MediaItem>[];
-    final selectors = [resultSelector, '.book-item', '.search-item', 'dl', 'li'];
-
-    for (final selector in selectors) {
-      if (selector.isEmpty) continue;
-      final elements = HtmlUtil.extractAll(html, selector);
-      if (elements.isEmpty) continue;
-
-      for (final element in elements) {
-        final item = _parseNovelElement(element, source, baseUrl,
-          titleSelector: titleSelector,
-          linkSelector: linkSelector,
-          coverSelector: coverSelector,
-          authorSelector: authorSelector,
-        );
-        if (item != null) items.add(item);
-      }
-
-      if (items.isNotEmpty) break;
-    }
-
-    return items;
-  }
-
-  MediaItem? _parseNovelElement(
-    Element element,
-    String source,
-    String baseUrl, {
-    required String titleSelector,
-    required String linkSelector,
-    required String coverSelector,
-    required String authorSelector,
-  }) {
-    final titleEl = element.querySelector(titleSelector) ??
-        element.querySelector('h3, h2, .title, .bookname, a');
-    final title = titleEl?.text.trim() ?? '';
-    if (title.isEmpty || title.length < 2) return null;
-
-    final linkEl = element.querySelector(linkSelector) ?? element.querySelector('a[href]');
-    var link = linkEl?.attributes['href'] ?? '';
-    if (link.isNotEmpty && !link.startsWith('http')) {
-      link = '$baseUrl$link';
-    }
-
-    final imgEl = element.querySelector(coverSelector) ?? element.querySelector('img');
-    var cover = imgEl?.attributes['data-src'] ?? imgEl?.attributes['src'] ?? '';
-    if (cover.isNotEmpty && !cover.startsWith('http')) {
-      cover = '$baseUrl$cover';
-    }
-
-    final authorEl = element.querySelector(authorSelector);
-    final author = authorEl?.text.trim();
-
-    return MediaItem(
-      id: 'novel_${link.hashCode}',
-      title: title,
-      coverUrl: cover.isNotEmpty ? cover : null,
-      description: author != null ? '作者: $author' : null,
-      mediaType: MediaType.novel,
       detailUrl: link.isNotEmpty ? link : null,
       source: source,
     );

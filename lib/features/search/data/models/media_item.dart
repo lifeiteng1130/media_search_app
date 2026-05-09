@@ -11,6 +11,7 @@ class MediaItem {
   final String? source;
   final String? detailUrl;
   final List<Episode>? episodes;
+  final String? bookSourceUrl; // 小说书源 URL（用于规则化解析）
 
   const MediaItem({
     required this.id,
@@ -23,6 +24,7 @@ class MediaItem {
     this.source,
     this.detailUrl,
     this.episodes,
+    this.bookSourceUrl,
   });
 
   MediaItem copyWith({
@@ -36,6 +38,7 @@ class MediaItem {
     String? source,
     String? detailUrl,
     List<Episode>? episodes,
+    String? bookSourceUrl,
   }) {
     return MediaItem(
       id: id ?? this.id,
@@ -48,6 +51,7 @@ class MediaItem {
       source: source ?? this.source,
       detailUrl: detailUrl ?? this.detailUrl,
       episodes: episodes ?? this.episodes,
+      bookSourceUrl: bookSourceUrl ?? this.bookSourceUrl,
     );
   }
 
@@ -61,6 +65,7 @@ class MediaItem {
     'year': year,
     'source': source,
     'detailUrl': detailUrl,
+    'bookSourceUrl': bookSourceUrl,
   };
 
   factory MediaItem.fromJson(Map<String, dynamic> json) => MediaItem(
@@ -73,6 +78,7 @@ class MediaItem {
     year: json['year'] as String?,
     source: json['source'] as String?,
     detailUrl: json['detailUrl'] as String?,
+    bookSourceUrl: json['bookSourceUrl'] as String?,
   );
 }
 
