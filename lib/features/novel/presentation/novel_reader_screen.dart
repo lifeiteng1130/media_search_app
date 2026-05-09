@@ -509,7 +509,7 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
     final chaptersAsync = ref.read(chaptersProvider(widget.item));
     chaptersAsync.whenData((result) {
       final chapters = result.chapters;
-      final index = chapters.indexOf(_currentChapter);
+      final index = _currentChapter != null ? chapters.indexOf(_currentChapter!) : 0;
       if (index >= 0 && index < chapters.length - 1) {
         setState(() {
           _currentChapter = chapters[index + 1];
@@ -658,7 +658,7 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
                 chaptersAsync.when(
                   data: (result) {
                     final chapters = result.chapters;
-                    final currentIndex = chapters.indexOf(_currentChapter).toDouble();
+                    final currentIndex = (_currentChapter != null ? chapters.indexOf(_currentChapter!) : 0).toDouble();
                     return Row(
                       children: [
                         Text('上一章', style: TextStyle(fontSize: 12,

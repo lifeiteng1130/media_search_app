@@ -1,13 +1,17 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
 import '../../../core/network/api_client.dart';
+import '../../novel/data/novel_repository.dart';
+import '../../novel/data/book_source_repository.dart';
 import '../data/models/media_item.dart';
 import '../data/models/media_type.dart';
 import '../data/models/search_result.dart';
 import '../data/search_repository.dart';
 
 final searchRepositoryProvider = Provider<SearchRepository>((ref) {
-  return SearchRepository(ApiClient());
+  final apiClient = ApiClient();
+  final novelRepo = NovelRepository(apiClient, BookSourceRepository(apiClient));
+  return SearchRepository(apiClient, novelRepo);
 });
 
 final searchQueryProvider = StateProvider<String>((ref) => '');

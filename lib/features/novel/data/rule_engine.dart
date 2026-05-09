@@ -51,7 +51,7 @@ class RuleEngine {
 
     // 应用正则替换
     if (value != null && regexReplace != null) {
-      value = _applyRegexReplace(value, regexReplace);
+      value = applyReplace(value, regexReplace);
     }
 
     return value;
@@ -111,7 +111,7 @@ class RuleEngine {
 
     var value = _extractValue(target, extraction);
     if (value != null && regexReplace != null) {
-      value = _applyRegexReplace(value, regexReplace);
+      value = applyReplace(value, regexReplace);
     }
     return value;
   }
@@ -247,7 +247,7 @@ class RuleEngine {
   }
 
   /// 应用正则替换
-  static String _applyRegexReplace(String text, String regexStr) {
+  static String applyReplace(String text, String regexStr) {
     // 格式: ##regex##replacement 或 ##regex
     final parts = regexStr.substring(2).split('##');
     if (parts.isEmpty || parts[0].isEmpty) return text;

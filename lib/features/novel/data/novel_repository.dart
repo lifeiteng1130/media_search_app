@@ -1,6 +1,7 @@
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../../core/network/api_client.dart';
 import '../../search/data/models/media_item.dart';
+import '../../search/data/models/media_type.dart';
 import 'book_source.dart';
 import 'book_source_repository.dart';
 import 'rule_engine.dart';
