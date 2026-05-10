@@ -113,7 +113,7 @@ class NovelRepository {
     }
 
     try {
-      var html = await _apiClient.fetchHtml(detailUrl);
+      var html = await _apiClient.fetchHtml(detailUrl).timeout(const Duration(seconds: 15));
       var tocUrl = detailUrl;
 
       // 如果 ruleBookInfo 指定了独立目录页
@@ -122,7 +122,7 @@ class NovelRepository {
         if (extractedTocUrl != null && extractedTocUrl.isNotEmpty) {
           tocUrl = RuleEngine.resolveUrl(detailUrl, extractedTocUrl);
           if (tocUrl != detailUrl) {
-            html = await _apiClient.fetchHtml(tocUrl);
+            html = await _apiClient.fetchHtml(tocUrl).timeout(const Duration(seconds: 15));
           }
         }
       }
@@ -177,25 +177,6 @@ class NovelRepository {
       ));
     }
 
-    // 按 URL 数字排序
-    if (chapters.isNotEmpty) {
-      final numPattern = RegExp(r'/(\d+)\.html$');
-      chapters.sort((a, b) {
-        final aMatch = numPattern.firstMatch(a.url);
-        final bMatch = numPattern.firstMatch(b.url);
-        final aNum = aMatch != null ? int.tryParse(aMatch.group(1)!) ?? 0 : 0;
-        final bNum = bMatch != null ? int.tryParse(bMatch.group(1)!) ?? 0 : 0;
-        return aNum.compareTo(bNum);
-      });
-      for (int i = 0; i < chapters.length; i++) {
-        chapters[i] = NovelChapter(
-          title: chapters[i].title,
-          url: chapters[i].url,
-          index: i,
-        );
-      }
-    }
-
     return chapters;
   }
 
@@ -207,7 +188,7 @@ class NovelRepository {
     if (cached != null) return cached as String;
 
     try {
-      final html = await _apiClient.fetchHtml(chapterUrl);
+      final html = await _apiClient.fetchHtml(chapterUrl).timeout(const Duration(seconds: 15));
       var content = _parseContent(html, source);
 
       // 处理分页内容
@@ -218,7 +199,7 @@ class NovelRepository {
           if (!nextUrl.startsWith('http')) {
             nextUrl = RuleEngine.resolveUrl(chapterUrl, nextUrl);
           }
-          final nextHtml = await _apiClient.fetchHtml(nextUrl);
+          final nextHtml = await _apiClient.fetchHtml(nextUrl).timeout(const Duration(seconds: 15));
           final nextContent = _extractContent(nextHtml, source);
           if (nextContent.isNotEmpty) {
             content += '\n\n$nextContent';
@@ -234,7 +215,7 @@ class NovelRepository {
 
       return content;
     } catch (e) {
-      return '加载失败: $e';
+      return '章节内容加载失败，请尝试换源';
     }
   }
 

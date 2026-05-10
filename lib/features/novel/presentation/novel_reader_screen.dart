@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,95 +24,152 @@ final novelRepositoryProvider = Provider<NovelRepository>((ref) {
   return NovelRepository(ApiClient(), ref.read(bookSourceRepositoryProvider));
 });
 
+// ========== 详情页状态 ==========
+
+class NovelDetailState {
+  final BookSource? source;
+  final List<NovelChapter> chapters;
+  final bool isLoading;
+  final String? error;
+
+  const NovelDetailState({
+    this.source,
+    this.chapters = const [],
+    this.isLoading = false,
+    this.error,
+  });
+
+  NovelDetailState copyWith({
+    BookSource? source,
+    List<NovelChapter>? chapters,
+    bool? isLoading,
+    String? error,
+  }) {
+    return NovelDetailState(
+      source: source ?? this.source,
+      chapters: chapters ?? this.chapters,
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+    );
+  }
+}
+
+class NovelDetailNotifier extends StateNotifier<NovelDetailState> {
+  final NovelRepository _repo;
+  final BookSourceRepository _sourceRepo;
+  final MediaItem _item;
+
+  NovelDetailNotifier(this._repo, this._sourceRepo, this._item)
+      : super(const NovelDetailState()) {
+    loadChapters();
+  }
+
+  String? get _detailUrl => _item.detailUrl;
+
+  /// 加载章节（顺序尝试，找到即停）
+  Future<void> loadChapters({BookSource? preferredSource}) async {
+    final detailUrl = _detailUrl;
+    if (detailUrl == null) {
+      state = const NovelDetailState(error: '无效的书籍链接');
+      return;
+    }
+
+    state = state.copyWith(isLoading: true, error: null);
+    final triedUrls = <String>{};
+    final sourcesToTry = <BookSource>[];
+
+    // 1. 指定的书源
+    if (preferredSource != null) {
+      sourcesToTry.add(preferredSource);
+      triedUrls.add(preferredSource.bookSourceUrl);
+    }
+
+    // 2. item.bookSourceUrl 匹配的源
+    if (_item.bookSourceUrl != null && _item.bookSourceUrl!.isNotEmpty) {
+      if (!triedUrls.contains(_item.bookSourceUrl)) {
+        final found = await _sourceRepo.findByUrl(_item.bookSourceUrl!);
+        if (found != null) {
+          sourcesToTry.add(found);
+          triedUrls.add(found.bookSourceUrl);
+        }
+      }
+    }
+
+    // 3. detailUrl 前缀匹配的源
+    final urlMatch = await _sourceRepo.findByUrl(detailUrl);
+    if (urlMatch != null && !triedUrls.contains(urlMatch.bookSourceUrl)) {
+      sourcesToTry.add(urlMatch);
+      triedUrls.add(urlMatch.bookSourceUrl);
+    }
+
+    // 逐个尝试
+    for (final source in sourcesToTry) {
+      final result = await _trySource(detailUrl, source);
+      if (result != null) return;
+    }
+
+    // 4. 按权重降序取前 10 个源，逐个尝试
+    final allSources = await _sourceRepo.getEnabled();
+    final candidates = allSources
+        .where((s) => !triedUrls.contains(s.bookSourceUrl))
+        .toList()
+      ..sort((a, b) => b.weight.compareTo(a.weight));
+
+    for (final source in candidates.take(10)) {
+      final result = await _trySource(detailUrl, source);
+      if (result != null) return;
+    }
+
+    // 全部失败
+    if (mounted) {
+      state = const NovelDetailState(
+        isLoading: false,
+        error: '未找到可用书源，请手动换源',
+      );
+    }
+  }
+
+  /// 尝试单个书源，成功返回 ChaptersResult，失败返回 null
+  Future<ChaptersResult?> _trySource(String detailUrl, BookSource source) async {
+    try {
+      final chapters = await _repo
+          .getChapters(detailUrl, source)
+          .timeout(const Duration(seconds: 15));
+      if (chapters.isNotEmpty && mounted) {
+        state = NovelDetailState(
+          source: source,
+          chapters: chapters,
+          isLoading: false,
+        );
+        return ChaptersResult(chapters, source);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 换源
+  Future<void> changeSource(BookSource source) async {
+    state = NovelDetailState(isLoading: true, error: null);
+    await loadChapters(preferredSource: source);
+  }
+}
+
 class ChaptersResult {
   final List<NovelChapter> chapters;
   final BookSource? source;
   const ChaptersResult(this.chapters, this.source);
 }
 
-/// 加载指定书源的章节（用于换源）
-final chaptersWithSourceProvider =
-    FutureProvider.family<ChaptersResult, _ChaptersRequest>((ref, req) async {
-  final repo = ref.read(novelRepositoryProvider);
-  try {
-    final chapters = await repo.getChapters(req.detailUrl, req.source);
-    return ChaptersResult(chapters, req.source);
-  } catch (_) {
-    return ChaptersResult(<NovelChapter>[], req.source);
-  }
+final novelDetailProvider = StateNotifierProvider.family<
+    NovelDetailNotifier, NovelDetailState, MediaItem>((ref, item) {
+  return NovelDetailNotifier(
+    ref.read(novelRepositoryProvider),
+    ref.read(bookSourceRepositoryProvider),
+    item,
+  );
 });
 
-class _ChaptersRequest {
-  final String detailUrl;
-  final BookSource source;
-  const _ChaptersRequest(this.detailUrl, this.source);
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is _ChaptersRequest &&
-          detailUrl == other.detailUrl &&
-          source.bookSourceUrl == other.source.bookSourceUrl;
-
-  @override
-  int get hashCode => detailUrl.hashCode ^ source.bookSourceUrl.hashCode;
-}
-
-/// 自动选择最佳书源加载章节
-final chaptersProvider =
-    FutureProvider.family<ChaptersResult, MediaItem>((ref, item) async {
-  if (item.detailUrl == null) return const ChaptersResult([], null);
-  final repo = ref.read(novelRepositoryProvider);
-  final sourceRepo = ref.read(bookSourceRepositoryProvider);
-  final detailUrl = item.detailUrl!;
-
-  // 优先用指定的书源
-  BookSource? preferredSource;
-  if (item.bookSourceUrl != null && item.bookSourceUrl!.isNotEmpty) {
-    preferredSource = await sourceRepo.findByUrl(item.bookSourceUrl!);
-  }
-  preferredSource ??= await sourceRepo.findByUrl(detailUrl);
-
-  // 如果有指定书源，先用它
-  if (preferredSource != null) {
-    try {
-      final chapters = await repo.getChapters(detailUrl, preferredSource);
-      if (chapters.isNotEmpty) return ChaptersResult(chapters, preferredSource);
-    } catch (_) {}
-  }
-
-  // 并行尝试部分启用的书源（按权重排序取前 20），选章节最多的
-  final allSources = await sourceRepo.getEnabled();
-  // 排除已尝试的书源，按权重降序取前 20 个
-  final candidates = allSources
-      .where((s) =>
-          preferredSource == null ||
-          s.bookSourceUrl != preferredSource.bookSourceUrl)
-      .toList()
-    ..sort((a, b) => b.weight.compareTo(a.weight));
-  final toTry = candidates.take(20).toList();
-
-  final futures = toTry.map((s) async {
-    try {
-      final chapters = await repo.getChapters(detailUrl, s);
-      return ChaptersResult(chapters, s);
-    } catch (_) {
-      return ChaptersResult(<NovelChapter>[], s);
-    }
-  }).toList();
-
-  final results = await Future.wait(futures);
-  ChaptersResult? best;
-  for (final r in results) {
-    if (r.chapters.isNotEmpty) {
-      if (best == null || r.chapters.length > best.chapters.length) {
-        best = r;
-      }
-    }
-  }
-
-  return best ?? const ChaptersResult([], null);
-});
+// ========== 章节内容 ==========
 
 class ChapterWithSource {
   final NovelChapter chapter;
@@ -163,9 +221,29 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
     } catch (_) {}
   }
 
+  void _showSourcePicker() async {
+    final sourceRepo = ref.read(bookSourceRepositoryProvider);
+    final sources = await sourceRepo.getEnabled();
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return _SourcePickerSheet(
+          sources: sources,
+          onSourceSelected: (source) {
+            Navigator.pop(ctx);
+            ref.read(novelDetailProvider(widget.item).notifier).changeSource(source);
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final chaptersAsync = ref.watch(chaptersProvider(widget.item));
+    final detailState = ref.watch(novelDetailProvider(widget.item));
 
     return Scaffold(
       body: CustomScrollView(
@@ -180,10 +258,7 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.blueGrey[900]!,
-                      Colors.blueGrey[700]!,
-                    ],
+                    colors: [Colors.blueGrey[900]!, Colors.blueGrey[700]!],
                   ),
                 ),
                 child: SafeArea(
@@ -261,8 +336,7 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
                                     '来源: ${widget.item.source}',
                                     style: TextStyle(
                                         fontSize: 11,
-                                        color:
-                                            Colors.white.withOpacity(0.8)),
+                                        color: Colors.white.withOpacity(0.8)),
                                   ),
                                 ),
                             ],
@@ -275,7 +349,6 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
               ),
             ),
             actions: [
-              // 收藏按钮
               Consumer(
                 builder: (context, ref, _) {
                   final isFav = ref
@@ -285,55 +358,47 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
                     icon: Icon(
                         isFav ? Icons.favorite : Icons.favorite_border,
                         color: isFav ? Colors.red : Colors.white),
-                    onPressed: () =>
-                        ref.read(favoritesProvider.notifier).toggle(widget.item),
+                    onPressed: () => ref
+                        .read(favoritesProvider.notifier)
+                        .toggle(widget.item),
                   );
                 },
               ),
             ],
           ),
 
-          // 换源按钮
+          // 书源信息 + 换源按钮
           SliverToBoxAdapter(
-            child: chaptersAsync.when(
-              data: (result) {
-                final sourceName =
-                    result.source?.bookSourceName ?? '未匹配到书源';
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Row(
-                    children: [
-                      Icon(Icons.source, size: 16, color: Colors.grey[500]),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          result.source != null
-                              ? '书源: $sourceName'
-                              : '未匹配到书源，请手动换源',
-                          style:
-                              TextStyle(fontSize: 12, color: Colors.grey[500]),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      TextButton.icon(
-                        icon: const Icon(Icons.swap_horiz, size: 16),
-                        label:
-                            const Text('换源', style: TextStyle(fontSize: 13)),
-                        onPressed: () =>
-                            _showChangeSourceDialog(context, ref),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                    ],
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Row(
+                children: [
+                  Icon(Icons.source, size: 16, color: Colors.grey[500]),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      detailState.source != null
+                          ? '书源: ${detailState.source!.bookSourceName}'
+                          : (detailState.isLoading
+                              ? '正在匹配书源...'
+                              : '未匹配到书源'),
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                );
-              },
-              loading: () => const SizedBox(),
-              error: (_, __) => const SizedBox(),
+                  TextButton.icon(
+                    icon: const Icon(Icons.swap_horiz, size: 16),
+                    label: const Text('换源', style: TextStyle(fontSize: 13)),
+                    onPressed: _showSourcePicker,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
 
@@ -347,144 +412,111 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
                       style:
                           TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(width: 8),
-                  chaptersAsync.when(
-                    data: (result) => Text(
-                      '${result.chapters.length}章',
+                  if (detailState.chapters.isNotEmpty)
+                    Text(
+                      '${detailState.chapters.length}章',
                       style: TextStyle(fontSize: 14, color: Colors.grey[500]),
                     ),
-                    loading: () => const SizedBox(),
-                    error: (_, __) => const SizedBox(),
-                  ),
                 ],
               ),
             ),
           ),
 
-          // 章节列表
-          chaptersAsync.when(
-            data: (result) {
-              if (result.chapters.isEmpty) {
-                return SliverFillRemaining(
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.menu_book,
-                            size: 64, color: Colors.grey[400]),
-                        const SizedBox(height: 16),
-                        Text('暂无章节',
-                            style: TextStyle(
-                                fontSize: 16, color: Colors.grey[500])),
-                        const SizedBox(height: 8),
-                        Text('点击右上角「换源」尝试其他书源',
-                            style: TextStyle(
-                                fontSize: 13, color: Colors.grey[400])),
-                      ],
-                    ),
-                  ),
-                );
-              }
-              return SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final chapter = result.chapters[index];
-                    return ListTile(
-                      dense: true,
-                      title: Text(
-                        chapter.title,
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                      trailing: const Icon(Icons.chevron_right, size: 18),
-                      onTap: () {
-                        if (result.source != null) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => NovelReaderScreen(
-                                item: widget.item,
-                                chapters: result.chapters,
-                                initialChapter: chapter,
-                                source: result.source!,
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                    );
-                  },
-                  childCount: result.chapters.length,
-                ),
-              );
-            },
-            loading: () => const SliverFillRemaining(
-              child: Center(child: CircularProgressIndicator()),
-            ),
-            error: (e, _) => SliverFillRemaining(
+          // 章节列表 / 加载中 / 错误
+          if (detailState.isLoading)
+            const SliverFillRemaining(
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red),
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('正在加载章节...', style: TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              ),
+            )
+          else if (detailState.error != null)
+            SliverFillRemaining(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.cloud_off, size: 64, color: Colors.grey[400]),
                     const SizedBox(height: 16),
-                    Text('加载失败: $e'),
+                    Text(detailState.error!,
+                        style: TextStyle(fontSize: 16, color: Colors.grey[500])),
                     const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () =>
-                          ref.invalidate(chaptersProvider(widget.item)),
-                      child: const Text('重试'),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.swap_horiz),
+                      label: const Text('换源'),
+                      onPressed: _showSourcePicker,
                     ),
                   ],
                 ),
               ),
+            )
+          else if (detailState.chapters.isEmpty)
+            SliverFillRemaining(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.menu_book, size: 64, color: Colors.grey[400]),
+                    const SizedBox(height: 16),
+                    Text('暂无章节', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
+                    const SizedBox(height: 8),
+                    Text('点击上方「换源」尝试其他书源',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+                  ],
+                ),
+              ),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final chapter = detailState.chapters[index];
+                  return ListTile(
+                    dense: true,
+                    title: Text(chapter.title,
+                        style: const TextStyle(fontSize: 14)),
+                    trailing:
+                        const Icon(Icons.chevron_right, size: 18),
+                    onTap: () {
+                      if (detailState.source != null) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => NovelReaderScreen(
+                              item: widget.item,
+                              chapters: detailState.chapters,
+                              initialChapter: chapter,
+                              source: detailState.source!,
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  );
+                },
+                childCount: detailState.chapters.length,
+              ),
             ),
-          ),
         ],
       ),
     );
   }
-
-  void _showChangeSourceDialog(BuildContext context, WidgetRef ref) async {
-    final sourceRepo = ref.read(bookSourceRepositoryProvider);
-    final sources = await sourceRepo.getEnabled();
-    final detailUrl = widget.item.detailUrl;
-    if (detailUrl == null || !context.mounted) return;
-
-    // 对每个书源尝试加载章节数（用一个简单的方式：直接用 chaptersWithSourceProvider）
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return _SourcePickerSheet(
-          sources: sources,
-          detailUrl: detailUrl,
-          onSourceSelected: (source) {
-            // 先关闭底部弹窗，再替换当前详情页
-            Navigator.pop(context);
-            final newItem = widget.item.copyWith(bookSourceUrl: source.bookSourceUrl);
-            ref.invalidate(chaptersProvider(newItem));
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => NovelDetailScreen(item: newItem),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 }
 
-/// 书源选择弹窗
+// ========== 书源选择弹窗 ==========
+
 class _SourcePickerSheet extends StatefulWidget {
   final List<BookSource> sources;
-  final String detailUrl;
   final ValueChanged<BookSource> onSourceSelected;
 
   const _SourcePickerSheet({
     required this.sources,
-    required this.detailUrl,
     required this.onSourceSelected,
   });
 
@@ -494,57 +526,19 @@ class _SourcePickerSheet extends StatefulWidget {
 
 class _SourcePickerSheetState extends State<_SourcePickerSheet> {
   String _searchQuery = '';
-  final Map<String, int> _chapterCounts = {};
-  final Map<String, bool> _loadingStatus = {};
-  bool _isChecking = false;
-
-  @override
-  void initState() {
-    super.initState();
-    // 不自动检测，用户点击"检测可用源"按钮时再检测
-  }
-
-  Future<void> _checkSources() async {
-    if (_isChecking) return;
-    setState(() => _isChecking = true);
-
-    final repo = NovelRepository(ApiClient(), BookSourceRepository(ApiClient()));
-    // 并行检测前 30 个源
-    final toCheck = widget.sources.take(30).toList();
-    final futures = toCheck.map((s) async {
-      setState(() => _loadingStatus[s.bookSourceUrl] = true);
-      try {
-        final chapters = await repo.getChapters(widget.detailUrl, s);
-        _chapterCounts[s.bookSourceUrl] = chapters.length;
-      } catch (_) {
-        _chapterCounts[s.bookSourceUrl] = 0;
-      }
-      if (mounted) setState(() => _loadingStatus[s.bookSourceUrl] = false);
-    }).toList();
-
-    await Future.wait(futures);
-    if (mounted) setState(() => _isChecking = false);
-  }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     var filtered = widget.sources;
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       filtered = filtered
           .where((s) =>
               s.bookSourceName.toLowerCase().contains(q) ||
-              s.bookSourceUrl.toLowerCase().contains(q))
+              s.bookSourceUrl.toLowerCase().contains(q) ||
+              s.bookSourceGroup.toLowerCase().contains(q))
           .toList();
-    }
-
-    // 如果有检测结果，按章节数降序排列
-    if (_chapterCounts.isNotEmpty) {
-      filtered.sort((a, b) {
-        final aCount = _chapterCounts[a.bookSourceUrl] ?? -1;
-        final bCount = _chapterCounts[b.bookSourceUrl] ?? -1;
-        return bCount.compareTo(aCount);
-      });
     }
 
     return DraggableScrollableSheet(
@@ -554,9 +548,10 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
       expand: false,
       builder: (context, scrollController) {
         return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(16)),
           ),
           child: Column(
             children: [
@@ -565,22 +560,18 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
                 child: Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text('选择书源',
                           style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold)),
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.onSurface)),
                     ),
-                    TextButton.icon(
-                      icon: _isChecking
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.autorenew, size: 18),
-                      label: Text(_isChecking ? '检测中...' : '检测可用源'),
-                      onPressed: _isChecking ? null : _checkSources,
-                    ),
+                    Text('${filtered.length}个',
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: theme.colorScheme.onSurface
+                                .withOpacity(0.5))),
                     IconButton(
                       icon: const Icon(Icons.close),
                       onPressed: () => Navigator.pop(context),
@@ -593,13 +584,16 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: TextField(
                   decoration: InputDecoration(
-                    hintText: '搜索书源...',
+                    hintText: '搜索书源名称或网址...',
                     prefixIcon: const Icon(Icons.search, size: 20),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8)),
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 12),
                     isDense: true,
+                    filled: true,
+                    fillColor: theme.colorScheme.surfaceVariant
+                        .withOpacity(0.5),
                     suffixIcon: _searchQuery.isNotEmpty
                         ? IconButton(
                             icon: const Icon(Icons.clear, size: 18),
@@ -614,58 +608,50 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
               const Divider(height: 1),
               // 书源列表
               Expanded(
-                child: ListView.builder(
-                  controller: scrollController,
-                  itemCount: filtered.length,
-                  itemBuilder: (context, index) {
-                    final source = filtered[index];
-                    final count = _chapterCounts[source.bookSourceUrl];
-                    final isLoading =
-                        _loadingStatus[source.bookSourceUrl] ?? false;
-
-                    return ListTile(
-                      title: Text(source.bookSourceName,
-                          style: const TextStyle(fontSize: 14)),
-                      subtitle: Text(source.bookSourceUrl,
-                          style: TextStyle(
-                              fontSize: 11, color: Colors.grey[500]),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
-                      trailing: isLoading
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2))
-                          : count != null
-                              ? Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: count > 0
-                                        ? Colors.green.withOpacity(0.1)
-                                        : Colors.red.withOpacity(0.1),
-                                    borderRadius:
-                                        BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    count > 0 ? '$count章' : '无章节',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: count > 0
-                                          ? Colors.green
-                                          : Colors.red,
+                child: filtered.isEmpty
+                    ? Center(
+                        child: Text('没有匹配的书源',
+                            style: TextStyle(
+                                color: theme.colorScheme.onSurface
+                                    .withOpacity(0.5))))
+                    : ListView.builder(
+                        controller: scrollController,
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
+                          final source = filtered[index];
+                          return ListTile(
+                            title: Text(source.bookSourceName,
+                                style: const TextStyle(fontSize: 14)),
+                            subtitle: Text(source.bookSourceUrl,
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: theme.colorScheme.onSurface
+                                        .withOpacity(0.4)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
+                            trailing: source.bookSourceGroup.isNotEmpty
+                                ? Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.primary
+                                          .withOpacity(0.1),
+                                      borderRadius:
+                                          BorderRadius.circular(4),
                                     ),
-                                  ),
-                                )
-                              : null,
-                      onTap: () {
-                        Navigator.pop(context);
-                        widget.onSourceSelected(source);
-                      },
-                    );
-                  },
-                ),
+                                    child: Text(
+                                      source.bookSourceGroup,
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          color:
+                                              theme.colorScheme.primary),
+                                    ),
+                                  )
+                                : null,
+                            onTap: () => widget.onSourceSelected(source),
+                          );
+                        },
+                      ),
               ),
             ],
           ),
@@ -851,8 +837,6 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
     }
 
     _pages = pages.isEmpty ? [''] : pages;
-
-    _pageController?.dispose();
     _pageController = PageController();
     _currentPage = 0;
   }
@@ -901,14 +885,11 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
       backgroundColor: _settings.theme.bg,
       body: Stack(
         children: [
-          // 主内容
           GestureDetector(
             behavior: HitTestBehavior.translucent,
             onTap: _toggleControls,
             child: _buildContent(),
           ),
-
-          // 亮度遮罩
           if (_settings.brightness >= 0)
             IgnorePointer(
               child: Opacity(
@@ -916,20 +897,12 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
                 child: Container(color: Colors.black),
               ),
             ),
-
-          // 顶部栏
           if (_showControls)
             SlideTransition(
-              position: _topBarAnimation,
-              child: _buildTopBar(),
-            ),
-
-          // 底部栏
+                position: _topBarAnimation, child: _buildTopBar()),
           if (_showControls)
             SlideTransition(
-              position: _bottomBarAnimation,
-              child: _buildBottomBar(),
-            ),
+                position: _bottomBarAnimation, child: _buildBottomBar()),
         ],
       ),
     );
@@ -955,17 +928,12 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
           children: [
             const Icon(Icons.error_outline, size: 48, color: Colors.red),
             const SizedBox(height: 16),
-            Text('加载失败', style: TextStyle(color: _settings.theme.text)),
-            const SizedBox(height: 8),
-            Text('$e',
-                style: TextStyle(
-                    fontSize: 12, color: _settings.theme.text.withOpacity(0.6)),
-                textAlign: TextAlign.center),
+            Text('章节内容加载失败',
+                style: TextStyle(color: _settings.theme.text)),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: () => ref.invalidate(
-                  chapterContentProvider(
-                      ChapterWithSource(_currentChapter, _bookSource))),
+              onPressed: () => ref.invalidate(chapterContentProvider(
+                  ChapterWithSource(_currentChapter, _bookSource))),
               child: const Text('重试'),
             ),
           ],
@@ -982,7 +950,6 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
     return SafeArea(
       child: Column(
         children: [
-          // 章节标题
           Padding(
             padding: EdgeInsets.symmetric(
                 horizontal: _settings.horizontalMargin, vertical: 8),
@@ -996,7 +963,6 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // 页面
           Expanded(
             child: PageView.builder(
               controller: _pageController,
@@ -1014,7 +980,6 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
               },
             ),
           ),
-          // 页码
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
@@ -1132,7 +1097,6 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                // 收藏
                 Consumer(
                   builder: (context, ref, _) {
                     final isFav = ref
@@ -1148,7 +1112,6 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
                     );
                   },
                 ),
-                // 下载
                 if (!_isDownloading)
                   IconButton(
                     icon: Icon(Icons.download,
@@ -1195,7 +1158,6 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 章节进度
                 Row(
                   children: [
                     const Text('上一章', style: TextStyle(fontSize: 12)),
@@ -1218,7 +1180,6 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
                     const Text('下一章', style: TextStyle(fontSize: 12)),
                   ],
                 ),
-                // 按钮行
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -1271,7 +1232,11 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
                       newSettings.horizontalMargin !=
                           _settings.horizontalMargin;
               _settings = newSettings;
-              if (newSettings.pageMode && changed) _pages = [];
+              if (newSettings.pageMode && changed) {
+                _pageController?.dispose();
+                _pageController = null;
+                _pages = [];
+              }
             });
             _settings.save();
           },
@@ -1296,7 +1261,6 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
           builder: (context, scrollController) {
             final initialIndex =
                 widget.chapters.indexOf(_currentChapter);
-            // 滚动到当前章节
             if (initialIndex > 0) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 scrollController.animateTo(
