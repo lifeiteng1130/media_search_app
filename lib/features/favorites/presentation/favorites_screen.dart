@@ -55,7 +55,7 @@ class FavoritesScreen extends ConsumerWidget {
                     item: item,
                     onTap: () {
                       if (item.mediaType == MediaType.novel) {
-                        context.push('/novel-reader', extra: item);
+                        context.push('/novel-detail', extra: item);
                       } else {
                         context.push('/player', extra: item);
                       }

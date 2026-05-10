@@ -44,17 +44,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
-        path: '/novel-reader',
+        path: '/novel-detail',
         builder: (context, state) {
           final item = state.extra as MediaItem;
-          return NovelReaderScreen(item: item);
+          return NovelDetailScreen(item: item);
         },
       ),
       GoRoute(
         path: '/novel-reader-offline',
         builder: (context, state) {
           final novel = state.extra as DownloadedNovel;
-          return NovelReaderScreen(
+          return NovelDetailScreen(
             item: MediaItem(
               id: novel.detailUrl,
               title: novel.title,

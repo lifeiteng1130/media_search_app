@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:go_router/go_router.dart';
 import '../data/history_repository.dart';
+import '../../search/data/models/media_item.dart';
+import '../../search/data/models/media_type.dart';
 
 final historyRepositoryProvider = Provider<HistoryRepository>((ref) {
   return HistoryRepository();
@@ -216,17 +219,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   void _navigateToDetail(HistoryRecord record) {
     if (record.type == HistoryType.read) {
-      Navigator.pushNamed(
-        context,
-        '/novel-reader',
-        arguments: record,
+      final item = MediaItem(
+        id: record.detailUrl,
+        title: record.title,
+        coverUrl: record.coverUrl,
+        description: record.subtitle,
+        mediaType: MediaType.novel,
+        detailUrl: record.detailUrl,
       );
+      context.push('/novel-detail', extra: item);
     } else {
-      Navigator.pushNamed(
-        context,
-        '/player',
-        arguments: record,
+      final item = MediaItem(
+        id: record.detailUrl,
+        title: record.title,
+        coverUrl: record.coverUrl,
+        description: record.subtitle,
+        mediaType: MediaType.movie,
+        detailUrl: record.detailUrl,
       );
+      context.push('/player', extra: item);
     }
   }
 
