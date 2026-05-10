@@ -50,7 +50,7 @@ class SettingsScreen extends ConsumerWidget {
             subtitle: const Text('查看和管理已下载的小说'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
-              Navigator.pushNamed(context, '/downloads');
+              context.push('/downloads');
             },
           ),
 
