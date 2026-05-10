@@ -33,29 +33,45 @@ final chaptersProvider = FutureProvider.family<ChaptersResult, MediaItem>((ref, 
   if (item.detailUrl == null) return const ChaptersResult([], null);
   final repo = ref.read(novelRepositoryProvider);
   final sourceRepo = ref.read(bookSourceRepositoryProvider);
+  final detailUrl = item.detailUrl!;
 
-  BookSource? source;
+  // 优先用指定的书源
+  BookSource? preferredSource;
   if (item.bookSourceUrl != null && item.bookSourceUrl!.isNotEmpty) {
-    source = await sourceRepo.findByUrl(item.bookSourceUrl!);
+    preferredSource = await sourceRepo.findByUrl(item.bookSourceUrl!);
   }
-  source ??= await sourceRepo.findByUrl(item.detailUrl!);
+  preferredSource ??= await sourceRepo.findByUrl(detailUrl);
 
-  if (source == null) {
-    // 尝试用所有启用的书源
-    final allSources = await sourceRepo.getEnabled();
-    for (final s in allSources) {
-      try {
-        final chapters = await repo.getChapters(item.detailUrl!, s);
-        if (chapters.isNotEmpty) {
-          return ChaptersResult(chapters, s);
-        }
-      } catch (_) {}
+  // 如果有指定书源，先用它
+  if (preferredSource != null) {
+    try {
+      final chapters = await repo.getChapters(detailUrl, preferredSource);
+      if (chapters.isNotEmpty) return ChaptersResult(chapters, preferredSource);
+    } catch (_) {}
+  }
+
+  // 并行尝试所有启用的书源，选章节最多的
+  final allSources = await sourceRepo.getEnabled();
+  final futures = allSources.map((s) async {
+    try {
+      final chapters = await repo.getChapters(detailUrl, s);
+      return ChaptersResult(chapters, s);
+    } catch (_) {
+      return ChaptersResult(<NovelChapter>[], s);
     }
-    return const ChaptersResult([], null);
+  }).toList();
+
+  final results = await Future.wait(futures);
+  ChaptersResult? best;
+  for (final r in results) {
+    if (r.chapters.isNotEmpty) {
+      if (best == null || r.chapters.length > best.chapters.length) {
+        best = r;
+      }
+    }
   }
 
-  final chapters = await repo.getChapters(item.detailUrl!, source);
-  return ChaptersResult(chapters, source);
+  return best ?? const ChaptersResult([], null);
 });
 
 class ChapterWithSource {
@@ -71,13 +87,45 @@ final chapterContentProvider = FutureProvider.family<String, ChapterWithSource>(
 
 // ========== 详情页（入口） ==========
 
-class NovelDetailScreen extends ConsumerWidget {
+class NovelDetailScreen extends ConsumerStatefulWidget {
   final MediaItem item;
   const NovelDetailScreen({super.key, required this.item});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final chaptersAsync = ref.watch(chaptersProvider(item));
+  ConsumerState<NovelDetailScreen> createState() => _NovelDetailScreenState();
+}
+
+class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _saveToHistory();
+  }
+
+  Future<void> _saveToHistory() async {
+    try {
+      final box = await Hive.openBox('read_history');
+      final existing = box.get(widget.item.detailUrl);
+      await box.put(widget.item.detailUrl, {
+        'title': widget.item.title,
+        'chapterTitle': existing != null
+            ? (Map<String, dynamic>.from(existing)['chapterTitle'] ?? '')
+            : '',
+        'chapterIndex': existing != null
+            ? (Map<String, dynamic>.from(existing)['chapterIndex'] ?? 0)
+            : 0,
+        'chapterUrl': existing != null
+            ? (Map<String, dynamic>.from(existing)['chapterUrl'] ?? '')
+            : '',
+        'coverUrl': widget.item.coverUrl ?? '',
+        'lastReadTime': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chaptersAsync = ref.watch(chaptersProvider(widget.item));
 
     return Scaffold(
       body: CustomScrollView(
@@ -109,9 +157,9 @@ class NovelDetailScreen extends ConsumerWidget {
                           borderRadius: BorderRadius.circular(8),
                           child: SizedBox(
                             width: 100, height: 140,
-                            child: item.coverUrl != null
+                            child: widget.item.coverUrl != null
                                 ? CachedNetworkImage(
-                                    imageUrl: item.coverUrl!,
+                                    imageUrl: widget.item.coverUrl!,
                                     fit: BoxFit.cover,
                                     placeholder: (_, __) => Container(
                                       color: Colors.grey[800],
@@ -136,7 +184,7 @@ class NovelDetailScreen extends ConsumerWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                item.title,
+                                widget.item.title,
                                 style: const TextStyle(
                                   fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white,
                                 ),
@@ -144,15 +192,15 @@ class NovelDetailScreen extends ConsumerWidget {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 8),
-                              if (item.description != null && item.description!.isNotEmpty)
+                              if (widget.item.description != null && widget.item.description!.isNotEmpty)
                                 Text(
-                                  item.description!,
+                                  widget.item.description!,
                                   style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.7)),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               const SizedBox(height: 4),
-                              if (item.source != null)
+                              if (widget.item.source != null)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                   decoration: BoxDecoration(
@@ -160,7 +208,7 @@ class NovelDetailScreen extends ConsumerWidget {
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
-                                    '来源: ${item.source}',
+                                    '来源: ${widget.item.source}',
                                     style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.8)),
                                   ),
                                 ),
@@ -177,11 +225,11 @@ class NovelDetailScreen extends ConsumerWidget {
               // 收藏按钮
               Consumer(
                 builder: (context, ref, _) {
-                  final isFav = ref.watch(favoritesProvider).any((i) => i.id == item.id);
+                  final isFav = ref.watch(favoritesProvider).any((i) => i.id == widget.item.id);
                   return IconButton(
                     icon: Icon(isFav ? Icons.favorite : Icons.favorite_border,
                         color: isFav ? Colors.red : Colors.white),
-                    onPressed: () => ref.read(favoritesProvider.notifier).toggle(item),
+                    onPressed: () => ref.read(favoritesProvider.notifier).toggle(widget.item),
                   );
                 },
               ),
@@ -272,7 +320,7 @@ class NovelDetailScreen extends ConsumerWidget {
                             context,
                             MaterialPageRoute(
                               builder: (_) => NovelReaderScreen(
-                                item: item,
+                                item: widget.item,
                                 chapters: result.chapters,
                                 initialChapter: chapter,
                                 source: result.source!,
@@ -444,6 +492,7 @@ class _NovelReaderScreenState extends ConsumerState<NovelReaderScreen>
         'chapterTitle': _currentChapter.title,
         'chapterIndex': _currentChapter.index,
         'chapterUrl': _currentChapter.url,
+        'coverUrl': widget.item.coverUrl ?? '',
         'lastReadTime': DateTime.now().toIso8601String(),
       });
     } catch (_) {}

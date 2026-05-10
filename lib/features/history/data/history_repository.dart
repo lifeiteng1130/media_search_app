@@ -19,6 +19,7 @@ class HistoryRepository {
           detailUrl: key as String,
           title: map['title'] as String? ?? '',
           subtitle: map['chapterTitle'] as String? ?? '',
+          coverUrl: map['coverUrl'] as String?,
           lastTime: DateTime.parse(map['lastReadTime'] as String),
           type: HistoryType.read,
         ));
