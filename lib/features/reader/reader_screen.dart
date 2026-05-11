@@ -38,10 +38,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   bool _isLoading = true;
   String? _error;
   bool _showControls = false;
-  late ReaderSettings _settings;
-  late PageController _pageController;
-  late ScrollController _scrollController;
-  bool _isVerticalScrollMode = false;
+  ReaderSettings? _settings;
+  PageController? _pageController;
+  ScrollController? _scrollController;
 
   @override
   void initState() {
@@ -49,24 +48,28 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     _currentChapterIndex = widget.initialIndex;
     _pageController = PageController();
     _scrollController = ScrollController();
-    _initSettings();
-    _loadContent();
+    _initAndLoad();
   }
 
-  Future<void> _initSettings() async {
+  Future<void> _initAndLoad() async {
     _settings = await ReaderSettings.load();
-    setState(() {});
+    if (mounted) {
+      setState(() {});
+      await _loadContent();
+    }
   }
 
   @override
   void dispose() {
-    _pageController.dispose();
-    _scrollController.dispose();
+    _pageController?.dispose();
+    _scrollController?.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
   Future<void> _loadContent() async {
+    if (_settings == null) return;
+
     setState(() {
       _isLoading = true;
       _error = null;
@@ -99,7 +102,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _paginateContent() {
-    if (_content.isEmpty) return;
+    if (_content.isEmpty || _settings == null) return;
 
     final pages = <String>[];
     final textPainter = TextPainter(
@@ -109,18 +112,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
-    final textWidth = screenWidth - _settings.horizontalMargin * 2;
-    final textHeight = screenHeight - _settings.verticalMargin * 2 - 100;
+    final textWidth = screenWidth - _settings!.horizontalMargin * 2;
+    final textHeight = screenHeight - _settings!.verticalMargin * 2 - 100;
 
-    final textSpan = TextSpan(text: _content, style: _settings.textStyle);
-    textPainter.text = textSpan;
-    textPainter.layout(maxWidth: textWidth);
+    if (textWidth <= 0 || textHeight <= 0) return;
 
     int startOffset = 0;
     while (startOffset < _content.length) {
       textPainter.text = TextSpan(
         text: _content.substring(startOffset),
-        style: _settings.textStyle,
+        style: _settings!.textStyle,
       );
       textPainter.layout(maxWidth: textWidth);
 
@@ -134,7 +135,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       );
       var endOffset = endPosition.offset;
 
-      // 找到最近的换行或标点
+      if (endOffset <= 0) endOffset = 1;
       if (endOffset < _content.length - startOffset) {
         final searchStart = startOffset + endOffset;
         final newlineIndex = _content.indexOf('\n', searchStart);
@@ -150,10 +151,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     setState(() {
       _pages = pages;
       _currentPageIndex = 0;
-      if (_pageController.hasClients) {
-        _pageController.jumpToPage(0);
-      }
     });
+    if (_pageController?.hasClients == true) {
+      _pageController!.jumpToPage(0);
+    }
   }
 
   Future<void> _saveProgress() async {
@@ -190,7 +191,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     showModalBottomSheet(
       context: context,
       builder: (ctx) => ReaderSettingsSheet(
-        settings: _settings,
+        settings: _settings!,
         onChanged: (newSettings) {
           setState(() => _settings = newSettings);
           newSettings.save();
@@ -202,13 +203,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = _settings.theme.bg;
+    if (_settings == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    final bgColor = _settings!.theme.bg;
 
     return Scaffold(
       backgroundColor: bgColor,
       body: Stack(
         children: [
-          // 内容区域
           GestureDetector(
             onTap: _toggleControls,
             child: _isLoading
@@ -218,7 +222,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(_error!, style: TextStyle(color: _settings.theme.text)),
+                            Text(_error!, style: TextStyle(color: _settings!.theme.text)),
                             const SizedBox(height: 16),
                             ElevatedButton(
                               onPressed: _loadContent,
@@ -227,13 +231,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                           ],
                         ),
                       )
-                    : _settings.pageMode
+                    : _settings!.pageMode
                         ? _buildPageView()
                         : _buildScrollView(),
           ),
-          // 顶部控制栏
           if (_showControls) _buildTopBar(),
-          // 底部控制栏
           if (_showControls) _buildBottomBar(),
         ],
       ),
@@ -241,7 +243,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Widget _buildPageView() {
-    if (_pages.isEmpty) return const SizedBox();
+    if (_pages.isEmpty) {
+      // 滚动模式下显示内容
+      if (_content.isNotEmpty) {
+        return _buildScrollView();
+      }
+      return const SizedBox();
+    }
 
     return PageView.builder(
       controller: _pageController,
@@ -250,10 +258,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       itemBuilder: (context, index) {
         return Padding(
           padding: EdgeInsets.symmetric(
-            horizontal: _settings.horizontalMargin,
-            vertical: _settings.verticalMargin,
+            horizontal: _settings!.horizontalMargin,
+            vertical: _settings!.verticalMargin,
           ),
-          child: Text(_pages[index], style: _settings.textStyle),
+          child: SingleChildScrollView(
+            child: Text(_pages[index], style: _settings!.textStyle),
+          ),
         );
       },
     );
@@ -263,10 +273,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     return SingleChildScrollView(
       controller: _scrollController,
       padding: EdgeInsets.symmetric(
-        horizontal: _settings.horizontalMargin,
-        vertical: _settings.verticalMargin,
+        horizontal: _settings!.horizontalMargin,
+        vertical: _settings!.verticalMargin,
       ),
-      child: Text(_content, style: _settings.textStyle),
+      child: Text(_content, style: _settings!.textStyle),
     );
   }
 
@@ -311,7 +321,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 章节滑块
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
@@ -329,7 +338,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 ],
               ),
             ),
-            // 操作按钮
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: Row(
@@ -392,9 +400,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                       widget.chapters[index].title,
                       style: TextStyle(
                         fontSize: 14,
-                        color: isCurrent
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
+                        color: isCurrent ? Theme.of(context).colorScheme.primary : null,
                         fontWeight: isCurrent ? FontWeight.bold : null,
                       ),
                     ),

@@ -40,33 +40,35 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
 
     final sourceRepo = BookSourceRepository(ApiClient());
     final bookRepo = BookRepository(ApiClient(), sourceRepo);
+    final allSources = await sourceRepo.getAll();
 
-    // 确定要尝试的源列表
+    // 构建尝试顺序：优先指定源 > 原始源 > 有 ruleToc 的启用源（按权重）
     List<BookSource> sourcesToTry = [];
 
     if (preferredSource != null) {
       sourcesToTry.add(preferredSource);
     }
 
-    // 尝试原始源
-    final allSources = await sourceRepo.getAll();
-    final originalSource = allSources.where((s) => s.bookSourceUrl == widget.result.bookSourceUrl).firstOrNull;
+    // 原始源
+    final originalSource = allSources
+        .where((s) => s.bookSourceUrl == widget.result.bookSourceUrl)
+        .firstOrNull;
     if (originalSource != null && !sourcesToTry.contains(originalSource)) {
       sourcesToTry.add(originalSource);
     }
 
-    // 按权重排序的其他源
+    // 其他有 ruleToc 的启用源，按权重降序
     final otherSources = allSources
         .where((s) => s.enabled && s.ruleToc != null && !sourcesToTry.contains(s))
         .toList()
       ..sort((a, b) => b.weight.compareTo(a.weight));
+    sourcesToTry.addAll(otherSources.take(15));
 
-    sourcesToTry.addAll(otherSources.take(10));
-
-    // 顺序尝试
+    // 顺序尝试，找到第一个有章节的就停止
     for (final source in sourcesToTry) {
       try {
-        final chapters = await bookRepo.getChapters(widget.result.detailUrl, source);
+        final chapters = await bookRepo.getChapters(widget.result.detailUrl, source)
+            .timeout(const Duration(seconds: 15));
         if (chapters.isNotEmpty && mounted) {
           setState(() {
             _currentSource = source;
@@ -95,7 +97,7 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
       'author': widget.result.author,
       'coverUrl': widget.result.coverUrl,
       'detailUrl': widget.result.detailUrl,
-      'source': widget.result.source,
+      'source': _currentSource?.bookSourceName ?? widget.result.source,
       'bookSourceUrl': _currentSource?.bookSourceUrl ?? widget.result.bookSourceUrl,
       'lastChapter': _chapters.isNotEmpty ? _chapters.last.title : '',
       'lastReadTime': DateTime.now().toIso8601String(),
@@ -109,9 +111,7 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
   }
 
   void _openReader(int chapterIndex) {
-    // 保存阅读历史
     _saveReadHistory(chapterIndex);
-
     context.push('/reader', extra: {
       'title': widget.result.title,
       'chapters': _chapters,
@@ -136,17 +136,12 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
     });
   }
 
-  Future<void> _showSourcePicker() async {
-    final sourceRepo = BookSourceRepository(ApiClient());
-    final allSources = await sourceRepo.getEnabled();
-
-    if (!mounted) return;
-
+  void _showSourcePicker() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => _SourcePickerSheet(
-        sources: allSources,
+      builder: (ctx) => SourcePickerSheet(
+        detailUrl: widget.result.detailUrl,
         currentSource: _currentSource,
         onSelected: (source) {
           Navigator.pop(ctx);
@@ -225,7 +220,6 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
               ),
             ),
           ),
-          // 操作按钮
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -254,7 +248,6 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
               ),
             ),
           ),
-          // 简介
           if (widget.result.intro != null && widget.result.intro!.isNotEmpty)
             SliverToBoxAdapter(
               child: Padding(
@@ -264,13 +257,12 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
                     maxLines: 3, overflow: TextOverflow.ellipsis),
               ),
             ),
-          // 章节标题
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Row(
                 children: [
-                  Text('目录', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Text('目录', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(width: 8),
                   if (!_isLoading && _chapters.isNotEmpty)
                     Text('共${_chapters.length}章', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
@@ -278,11 +270,8 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
               ),
             ),
           ),
-          // 章节列表
           if (_isLoading)
-            const SliverFillRemaining(
-              child: Center(child: CircularProgressIndicator()),
-            )
+            const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
           else if (_error != null)
             SliverFillRemaining(
               child: Center(
@@ -295,6 +284,11 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
                       onPressed: () => _loadChapters(),
                       icon: const Icon(Icons.refresh),
                       label: const Text('重试'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _showSourcePicker,
+                      child: const Text('手动换源'),
                     ),
                   ],
                 ),
@@ -321,46 +315,107 @@ class _BookDetailScreenState extends ConsumerState<BookDetailScreen> {
   }
 }
 
-class _SourcePickerSheet extends StatefulWidget {
-  final List<BookSource> sources;
+/// 换源弹窗 - 自动查询每个源的章节数
+class SourcePickerSheet extends StatefulWidget {
+  final String detailUrl;
   final BookSource? currentSource;
   final void Function(BookSource) onSelected;
 
-  const _SourcePickerSheet({
-    required this.sources,
+  const SourcePickerSheet({
+    super.key,
+    required this.detailUrl,
     this.currentSource,
     required this.onSelected,
   });
 
   @override
-  State<_SourcePickerSheet> createState() => _SourcePickerSheetState();
+  State<SourcePickerSheet> createState() => _SourcePickerSheetState();
 }
 
-class _SourcePickerSheetState extends State<_SourcePickerSheet> {
+class _SourcePickerSheetState extends State<SourcePickerSheet> {
   String _filter = '';
-  late List<BookSource> _filtered;
+  List<_SourceInfo> _sourceInfos = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _filtered = widget.sources;
+    _loadSources();
   }
 
-  void _updateFilter(String query) {
+  Future<void> _loadSources() async {
+    final sourceRepo = BookSourceRepository(ApiClient());
+    final allSources = await sourceRepo.getEnabled();
+    final bookRepo = BookRepository(ApiClient(), sourceRepo);
+
+    // 先显示列表，后台逐个查询章节
     setState(() {
-      _filter = query;
-      _filtered = query.isEmpty
-          ? widget.sources
-          : widget.sources.where((s) =>
-              s.bookSourceName.toLowerCase().contains(query.toLowerCase()) ||
-              s.bookSourceGroup.toLowerCase().contains(query.toLowerCase())).toList();
+      _sourceInfos = allSources
+          .where((s) => s.ruleToc != null)
+          .map((s) => _SourceInfo(source: s, chapterCount: -1, isLoading: true))
+          .toList();
+      _isLoading = false;
     });
+
+    // 并发查询每个源的章节数（限制并发数）
+    for (int i = 0; i < _sourceInfos.length; i += 5) {
+      final batch = _sourceInfos.sublist(i, (i + 5).clamp(0, _sourceInfos.length));
+      await Future.wait(batch.map((info) async {
+        try {
+          final chapters = await bookRepo.getChapters(widget.detailUrl, info.source)
+              .timeout(const Duration(seconds: 10));
+          if (mounted) {
+            setState(() {
+              final idx = _sourceInfos.indexWhere((s) => s.source.bookSourceUrl == info.source.bookSourceUrl);
+              if (idx >= 0) {
+                _sourceInfos[idx] = _SourceInfo(
+                  source: info.source,
+                  chapterCount: chapters.length,
+                  isLoading: false,
+                );
+              }
+            });
+          }
+        } catch (_) {
+          if (mounted) {
+            setState(() {
+              final idx = _sourceInfos.indexWhere((s) => s.source.bookSourceUrl == info.source.bookSourceUrl);
+              if (idx >= 0) {
+                _sourceInfos[idx] = _SourceInfo(
+                  source: info.source,
+                  chapterCount: 0,
+                  isLoading: false,
+                );
+              }
+            });
+          }
+        }
+      }));
+    }
+  }
+
+  List<_SourceInfo> get _filtered {
+    var list = _sourceInfos;
+    if (_filter.isNotEmpty) {
+      list = list.where((s) =>
+          s.source.bookSourceName.toLowerCase().contains(_filter.toLowerCase()) ||
+          s.source.bookSourceGroup.toLowerCase().contains(_filter.toLowerCase())).toList();
+    }
+    // 有章节的排前面，按章节数降序
+    list.sort((a, b) {
+      if (a.isLoading && !b.isLoading) return 1;
+      if (!a.isLoading && b.isLoading) return -1;
+      return b.chapterCount.compareTo(a.chapterCount);
+    });
+    return list;
   }
 
   @override
   Widget build(BuildContext context) {
+    final filtered = _filtered;
+
     return DraggableScrollableSheet(
-      initialChildSize: 0.7,
+      initialChildSize: 0.75,
       minChildSize: 0.4,
       maxChildSize: 0.9,
       expand: false,
@@ -371,15 +426,16 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
             child: Column(
               children: [
                 Container(
-                  width: 40,
-                  height: 4,
+                  width: 40, height: 4,
                   decoration: BoxDecoration(
                     color: Colors.grey[600],
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
                 const SizedBox(height: 16),
-                Text('选择书源', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text('选择书源', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Text('自动检测每个源的章节数', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
                 const SizedBox(height: 12),
                 TextField(
                   decoration: const InputDecoration(
@@ -387,7 +443,7 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
                     prefixIcon: Icon(Icons.search),
                     isDense: true,
                   ),
-                  onChanged: _updateFilter,
+                  onChanged: (v) => setState(() => _filter = v),
                 ),
               ],
             ),
@@ -395,20 +451,11 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
           Expanded(
             child: ListView.builder(
               controller: scrollController,
-              itemCount: _filtered.length,
+              itemCount: filtered.length,
               itemBuilder: (ctx, index) {
-                final source = _filtered[index];
-                final isCurrent = source.bookSourceUrl == widget.currentSource?.bookSourceUrl;
-                return ListTile(
-                  title: Text(source.bookSourceName, style: TextStyle(
-                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                  )),
-                  subtitle: Text(source.bookSourceGroup, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
-                  trailing: isCurrent
-                      ? Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary)
-                      : null,
-                  onTap: () => widget.onSelected(source),
-                );
+                final info = filtered[index];
+                final isCurrent = info.source.bookSourceUrl == widget.currentSource?.bookSourceUrl;
+                return _buildSourceTile(info, isCurrent);
               },
             ),
           ),
@@ -416,4 +463,67 @@ class _SourcePickerSheetState extends State<_SourcePickerSheet> {
       ),
     );
   }
+
+  Widget _buildSourceTile(_SourceInfo info, bool isCurrent) {
+    final hasChapters = info.chapterCount > 0;
+
+    return ListTile(
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(info.source.bookSourceName, style: TextStyle(
+              fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+              color: hasChapters ? null : Colors.grey[600],
+            )),
+          ),
+          if (isCurrent)
+            Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary, size: 18),
+        ],
+      ),
+      subtitle: Text(
+        info.source.bookSourceGroup.isEmpty ? info.source.bookSourceUrl : info.source.bookSourceGroup,
+        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+        maxLines: 1, overflow: TextOverflow.ellipsis,
+      ),
+      trailing: _buildChapterBadge(info),
+      onTap: () => widget.onSelected(info.source),
+    );
+  }
+
+  Widget _buildChapterBadge(_SourceInfo info) {
+    if (info.isLoading) {
+      return const SizedBox(
+        width: 20, height: 20,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+
+    if (info.chapterCount <= 0) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.grey[800],
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text('无章节', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.green.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text('${info.chapterCount}章', style: TextStyle(fontSize: 11, color: Colors.green[400])),
+    );
+  }
+}
+
+class _SourceInfo {
+  final BookSource source;
+  final int chapterCount;
+  final bool isLoading;
+
+  _SourceInfo({required this.source, required this.chapterCount, this.isLoading = false});
 }
