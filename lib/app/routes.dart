@@ -1,17 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../features/search/presentation/search_screen.dart';
-import '../features/player/presentation/video_player_screen.dart';
-import '../features/novel/presentation/novel_reader_screen.dart';
-import '../features/novel/presentation/novel_download_screen.dart';
-import '../features/novel/presentation/book_source_screen.dart';
-import '../features/favorites/presentation/favorites_screen.dart';
-import '../features/history/presentation/history_screen.dart';
-import '../features/settings/presentation/settings_screen.dart';
-import '../features/search/data/models/media_item.dart';
-import '../features/search/data/models/media_type.dart';
-import '../features/novel/data/novel_download_service.dart';
+import '../features/bookshelf/bookshelf_screen.dart';
+import '../features/discovery/discovery_screen.dart';
+import '../features/search/search_screen.dart';
+import '../features/settings/settings_screen.dart';
+import '../features/detail/book_detail_screen.dart';
+import '../features/reader/reader_screen.dart';
+import '../features/sources/book_source_screen.dart';
+import '../models/book_search_result.dart';
+import '../models/book_source.dart';
+import '../models/book_chapter.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -23,53 +22,38 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
         branches: [
           StatefulShellBranch(routes: [
-            GoRoute(path: '/', builder: (ctx, state) => const SearchScreen()),
+            GoRoute(path: '/', builder: (context, state) => const BookshelfScreen()),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/favorites', builder: (ctx, state) => const FavoritesScreen()),
+            GoRoute(path: '/discovery', builder: (context, state) => const DiscoveryScreen()),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/history', builder: (ctx, state) => const HistoryScreen()),
+            GoRoute(path: '/search', builder: (context, state) => const SearchScreen()),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/settings', builder: (ctx, state) => const SettingsScreen()),
+            GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
           ]),
         ],
       ),
       GoRoute(
-        path: '/player',
+        path: '/book-detail',
         builder: (context, state) {
-          final item = state.extra as MediaItem;
-          return VideoPlayerScreen(item: item);
+          final result = state.extra as BookSearchResult;
+          return BookDetailScreen(result: result);
         },
       ),
       GoRoute(
-        path: '/novel-detail',
+        path: '/reader',
         builder: (context, state) {
-          final item = state.extra as MediaItem;
-          return NovelDetailScreen(item: item);
-        },
-      ),
-      GoRoute(
-        path: '/novel-reader-offline',
-        builder: (context, state) {
-          final novel = state.extra as DownloadedNovel;
-          return NovelDetailScreen(
-            item: MediaItem(
-              id: novel.detailUrl,
-              title: novel.title,
-              coverUrl: novel.coverUrl,
-              description: novel.author,
-              mediaType: MediaType.novel,
-              detailUrl: novel.detailUrl,
-              bookSourceUrl: novel.bookSourceUrl,
-            ),
+          final args = state.extra as Map<String, dynamic>;
+          return ReaderScreen(
+            title: args['title'] as String,
+            chapters: args['chapters'] as List<BookChapter>,
+            initialIndex: args['initialIndex'] as int? ?? 0,
+            source: args['source'] as BookSource,
+            detailUrl: args['detailUrl'] as String,
           );
         },
-      ),
-      GoRoute(
-        path: '/downloads',
-        builder: (context, state) => const NovelDownloadScreen(),
       ),
       GoRoute(
         path: '/book-sources',
@@ -81,6 +65,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 
 class MainScaffold extends StatelessWidget {
   final StatefulNavigationShell navigationShell;
+
   const MainScaffold({super.key, required this.navigationShell});
 
   @override
@@ -89,12 +74,15 @@ class MainScaffold extends StatelessWidget {
       body: navigationShell,
       bottomNavigationBar: NavigationBar(
         selectedIndex: navigationShell.currentIndex,
-        onDestinationSelected: (index) => navigationShell.goBranch(index),
+        onDestinationSelected: (index) => navigationShell.goBranch(
+          index,
+          initialLocation: index == navigationShell.currentIndex,
+        ),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.search), label: '搜索'),
-          NavigationDestination(icon: Icon(Icons.favorite), label: '收藏'),
-          NavigationDestination(icon: Icon(Icons.history), label: '历史'),
-          NavigationDestination(icon: Icon(Icons.settings), label: '设置'),
+          NavigationDestination(icon: Icon(Icons.book_outlined), selectedIcon: Icon(Icons.book), label: '书架'),
+          NavigationDestination(icon: Icon(Icons.explore_outlined), selectedIcon: Icon(Icons.explore), label: '发现'),
+          NavigationDestination(icon: Icon(Icons.search), selectedIcon: Icon(Icons.search), label: '搜索'),
+          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: '设置'),
         ],
       ),
     );
